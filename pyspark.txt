@@ -1,0 +1,616 @@
+https://github.com/databricks/Spark-The-Definitive-Guide.git
+
+49546986683135544286507457936321625675700192471156785154
+
+flightData2015 = spark.read.option("inferSchema", "true").option("header", "true").csv("2015-summary.csv")
+
+df = spark.read.csv('file:///data/flight-data/csv/2015-summary.csv', header=True)
+
+C:/Spark/spark-3.1.1-bin-hadoop2.7/spark-3.1.1-bin-hadoop2.7/data/flight-data/csv/2015-summary.csv
+
+df = spark.read.option("inferSchema", "true").option("header", "true").csv("2015-summary.csv")
+
+flightData2015 = spark.read.option("inferSchema", "true").option("header", "true").csv("2015-summary.csv")
+flightData2015.sort('count').explain()
+flightData2015.sort("count").take(2)
+flightData2015.createOrReplaceTempView("flight_data_2015")
+sqlWay = spark.sql("""SELECT DEST_COUNTRY_NAME, count(1) FROM flight_data_2015 GROUP BY DEST_COUNTRY_NAME""")
+dataFrameWay = flightData2015.groupBy("DEST_COUNTRY_NAME").count()
+sqlWay.explain()
+dataFrameWay.explain()
+Both produces same plan
+
+spark.sql("SELECT max(count) from flight_data_2015").take(1)
+
+from pyspark.sql.functions import max
+flightData2015.select(max("count")).take(1)
+
+SQL way
+maxSql = spark.sql("""
+SELECT DEST_COUNTRY_NAME, sum(count) as destination_total
+FROM flight_data_2015
+GROUP BY DEST_COUNTRY_NAME
+ORDER BY sum(count) DESC
+LIMIT 5
+""")
+maxSql.show()
+
+Python way
+from pyspark.sql.functions import desc
+flightData2015\
+.groupBy("DEST_COUNTRY_NAME")\
+.sum("count")\
+.withColumnRenamed("sum(count)", "destination_total")\
+.sort(desc("destination_total"))\
+.limit(5)\
+.show()
+
+# to run spark application in cluster or standalone
+./bin/spark-submit \
+--master local \
+./examples/src/main/python/pi.py 10
+
+
+
+#For Static data
+For Static 
+staticDataFrame = spark.read.format("csv")\
+.option("header", "true")\
+.option("inferSchema", "true")\
+.load("/data/retail-data/by-day/*.csv")
+staticDataFrame.createOrReplaceTempView("retail_data")
+staticSchema = staticDataFrame.schema
+
+
+from pyspark.sql.functions import window, column, desc, col
+staticDataFrame\
+.selectExpr(
+"CustomerId",
+"(UnitPrice * Quantity) as total_cost",
+"InvoiceDate")\
+.groupBy(
+col("CustomerId"), window(col("InvoiceDate"), "1 day"))\
+.sum("total_cost")\
+.show(5)
+
+
+#For streaming data
+streamingDataFrame = spark.readStream\
+.schema(staticSchema)\
+.option("maxFilesPerTrigger", 1)\
+.format("csv")\
+.option("header", "true")\
+.load("/data/retail-data/by-day/*.csv")
+
+
+purchaseByCustomerPerHour = streamingDataFrame\
+.selectExpr(
+"CustomerId",
+"(UnitPrice * Quantity) as total_cost",
+"InvoiceDate")\
+.groupBy(
+col("CustomerId"), window(col("InvoiceDate"), "1 day"))\
+.sum("total_cost")
+
+purchaseByCustomerPerHour.writeStream\
+.format("memory")\
+.queryName("customer_purchases")\
+.outputMode("complete")\
+.start()
+
+# to see results on stream
+spark.sql("""
+SELECT *
+FROM customer_purchases
+ORDER BY `sum(total_cost)` DESC
+""")\
+.show(5)
+
+# to print data on console and not in memory
+purchaseByCustomerPerHour.writeStream
+.format("console")
+.queryName("customer_purchases_2")
+.outputMode("complete")
+.start()
+
+# Spark column types
+from pyspark.sql.types import *
+b = ByteType()
+
+# Assigning manual schema(schema is structFField of structType)
+from pyspark.sql.types import StructField, StructType, StringType, LongType
+myManualSchema = StructType([
+StructField("DEST_COUNTRY_NAME", StringType(), True),
+StructField("ORIGIN_COUNTRY_NAME", StringType(), True),
+StructField("count", LongType(), False, metadata={"hello":"world"})
+])
+df = spark.read.format("json").schema(myManualSchema)\
+.load("/data/flight-data/json/2015-summary.json")
+
+#Inserting a row
+from pyspark.sql import Row
+myRow = Row("Hello", None, 1, False)
+
+
+#Accessing elements of row
+myRow[0]
+myRow[2]
+
+# to view column names:
+df.columns
+
+#to view first row:
+df.first()
+
+#to view first 5 rows
+df.take(5)
+df.show(n=5)
+
+
+# Manually create a dataframe:
+from pyspark.sql import Row
+from pyspark.sql.types import StructField, StructType, StringType, LongType
+myManualSchema = StructType([
+StructField("some", StringType(), True),
+StructField("col", StringType(), True),
+StructField("names", LongType(), False)
+])
+myRow = Row("Hello", None, 1)
+myDf = spark.createDataFrame([myRow], myManualSchema)
+myDf.show()
+
+
+# Select and SelectExpr
+# in Python
+df.select("DEST_COUNTRY_NAME", "ORIGIN_COUNTRY_NAME").show(2)
+-- in SQL
+SELECT DEST_COUNTRY_NAME, ORIGIN_COUNTRY_NAME FROM dfTable LIMIT 2
+
+from pyspark.sql.functions import expr, col, column
+df.select(
+expr("DEST_COUNTRY_NAME"),
+col("DEST_COUNTRY_NAME"),
+column("DEST_COUNTRY_NAME"))\
+.show(2)
+
+col and column are same and both are subset of expr so we can use expr instead of col or columns
+
+#If we need to alias a column:
+-- in SQL
+SELECT DEST_COUNTRY_NAME as destination FROM dfTable LIMIT 2
+df.select(expr("DEST_COUNTRY_NAME AS destination")).show(2)
+df.select(expr("DEST_COUNTRY_NAME as destination").alias("DEST_COUNTRY_NAME"))\
+.show(2)
+
+# selectExpr
+df.selectExpr("DEST_COUNTRY_NAME as newColumnName", "DEST_COUNTRY_NAME").show(2)
+
+df.selectExpr(
+"*", # all original columns
+"(DEST_COUNTRY_NAME = ORIGIN_COUNTRY_NAME) as withinCountry")\
+.show(2)
+-- in SQL
+SELECT *, (DEST_COUNTRY_NAME = ORIGIN_COUNTRY_NAME) as withinCountry
+FROM dfTable
+LIMIT 2
+
+# in Python
+df.selectExpr("avg(count)", "count(distinct(DEST_COUNTRY_NAME))").show(2)
+-- in SQL
+SELECT avg(count), count(distinct(DEST_COUNTRY_NAME)) FROM dfTable LIMIT 2
+
+#Literals in spark, we can either use lit to add a column or a better way is using withcolumn along with lit
+from pyspark.sql.functions import lit
+df.select(expr("*"), lit(1).alias("One")).show(2)
+df.withColumn("numberOne", lit(1)).show(2)
+In SQL, literals are just the specific value:
+-- in SQL
+SELECT *, 1 as One FROM dfTable LIMIT 2
+df.withColumn("withinCountry", expr("ORIGIN_COUNTRY_NAME == DEST_COUNTRY_NAME"))\
+.show(2) -- this will result in a column name within country and put binary value in it. Note that withColumn takes two argument name of column and expression that will form this column.
+
+#to rename column:
+df.withColumnRenamed("DEST_COUNTRY_NAME", "dest").columns
+
+# droping a column 
+df.drop("ORIGIN_COUNTRY_NAME").columns
+df.drop("ORIGIN_COUNTRY_NAME", "DEST_COUNTRY_NAME")
+
+#casting in Spark
+df.withColumn("count2", col("count").cast("long"))
+
+#where clause of filter in dataframe
+df.where("count < 2").show(2)
+-- in SQL
+SELECT * FROM dfTable WHERE count < 2 LIMIT 2
+df.where(col("count") < 2).where(col("ORIGIN_COUNTRY_NAME") != "Croatia")\
+.show(2)
+-- in SQL
+SELECT * FROM dfTable WHERE count < 2 AND ORIGIN_COUNTRY_NAME != "Croatia"
+LIMIT 2
+
+#to get distinct rows
+df.select("ORIGIN_COUNTRY_NAME").distinct().show()
+-- in SQL
+SELECT (DISTINCT ORIGIN_COUNTRY_NAME) FROM dfTable
+
+# Ordering in dataframe
+df.orderBy("count", "DEST_COUNTRY_NAME").show(5)
+df.orderBy(col("count"), col("DEST_COUNTRY_NAME")).show(5)
+df.orderBy(expr("count desc")).show(2)
+df.orderBy(col("count").desc(), col("DEST_COUNTRY_NAME").asc()).show(2)
+
+for otimization pyrpose it is advised to use dort with partition
+spark.read.format("json").load("/data/flight-data/json/*-summary.json")\
+.sortWithinPartitions("count")
+
+An advanced tip is to use asc_nulls_first, desc_nulls_first, asc_nulls_last, or
+desc_nulls_last to specify where you would like your null values to appear in an ordered
+DataFrame
+
+#repartitioning and coalesce
+repartitioning will shuffle the entire data irrespective of weather it will produce more or less partition, we should try to create partitions on
+columns that are more frequently used for filtering
+in case of coalesce we merge certain partitions in this case we don't shuffle entire data just the partitions we need to merge.
+df.repartition(5, col("DEST_COUNTRY_NAME"))
+df.repartition(5, col("DEST_COUNTRY_NAME")).coalesce(2) -- this command will shuffle data based on DEST_COUNTRY_NAME and then will merge 5 partitions 
+it created into two partitions without doing any shuffle
+
+#to print data or bring back data to driver node:
+collectDF = df.limit(10)
+collectDF.take(5) # take works with an Integer count
+collectDF.show() # this prints it out nicely
+collectDF.show(5, False)
+collectDF.collect() # brings entire dataframe 
+collectDF.toLocalIterator() # this brings data as iterator of partitions and process data partition by partition.
+
+#working with dates
+SELECT date_sub(today, 5), date_add(today, 5) FROM dateTable
+we have two functions current_date() and current_timestamp() for current date and current date timestamp respt.
+-- in SQL
+SELECT to_date('2016-01-01'), months_between('2016-01-01', '2017-01-01'),
+datediff('2016-01-01', '2017-01-01')
+FROM dateTable
+SELECT to_date(date, 'yyyy-dd-MM'), to_date(date2, 'yyyy-dd-MM'), to_date(date)
+FROM dateTable2
+
+# handling Null
+When createing a schema and specifying null as True or False, spark doesn't enforce anything, we can still add NULL values into that column, It is
+just given to help spark SQL to treat that column in correct way in case of nulls and not nulls.
+
+We have various null function:
+from pyspark.sql.functions import coalesce
+df.select(coalesce(col("Description"), col("CustomerId"))).show()
+SELECT
+ifnull(null, 'return_value'),
+nullif('value', 'value'),
+nvl(null, 'return_value'),
+nvl2('not_null', 'return_value', "else_value")
+FROM dfTable LIMIT 1
+
+df = spark.read.format('csv').option('header', 'true').option('inferSchema','true').load('2010-12-01.csv')
+
+# Complex Datatypes
+1. STRUCT
+struct just acts like a dafarame inside a dataframe
+from pyspark.sql.functions import struct
+from pyspark.sql import functions as F
+complex_df = df.select(struct('Description', 'InvoiceNo').alias('complex'))
+To access objects of this struct we use either dot notation or the column method getField.
+
+complex_df.select('complex.Description')
+or
+complex_df.select(F.col('complex').getField('Description'))
+For SQL 
+sparl.sql('select complex.* from complex_df')
+
+2. ARRAY
+df.select(split(col("Description"), " ").alias("array_col")).selectExpr("array_col[0]").show(2)
+
+#convert comma seperated values in a column into row
+df.withColumn("splitted", split(F.col("Description"), " ")).withColumn("exploded", explode(F.col("splitted"))).select("Description", "InvoiceNo", "exploded").show(2)
+
+3. MAP
+Map is a key value pair just like array we can access map using key 
+from pyspark.sql.functions import create_map
+df.select(create_map(F.col("Description"), F.col("InvoiceNo")).alias("complex_map")).show(2)
+df.select(create_map(F.col("Description"), F.col("InvoiceNo")).alias("complex_map")).selectExpr("complex_map['WHITE METAL LANTERN']").show(2)
+
+df.select(create_map(F.col("Description"), F.col("InvoiceNo")).alias("complex_map")).selectExpr('explode(complex_map)').show(2)
+
+4. JSON
+# in Python
+jsonDF = spark.range(1).selectExpr("""
+'{"myJSONKey" : {"myJSONValue" : [1, 2, 3]}}' as jsonString""")
+
+
+#Aggregations
+df = spark.read.format("csv")\
+.option("header", "true")\
+.option("inferSchema", "true")\
+.load("*.csv")\
+.coalesce(5)
+
+df.cache()
+df.createOrReplaceTempView("dfTable")
+
+from pyspark.sql.functions import sum, count, avg, expr
+
+df.select(
+count("Quantity").alias("total_transactions"),
+sum("Quantity").alias("total_purchases"),
+avg("Quantity").alias("avg_purchases"),
+expr("mean(Quantity)").alias("mean_purchases"))\
+.selectExpr(
+"total_purchases/total_transactions",
+"avg_purchases",
+"mean_purchases").show()
+
+from pyspark.sql.functions import col, to_date
+dfWithDate = df.withColumn("date", to_date(col("InvoiceDate"), "MM/d/yyyy H:mm"))
+dfWithDate.createOrReplaceTempView("dfWithDate")
+
+Window function 
+from pyspark.sql.window import Window
+from pyspark.sql.functions import desc
+windowSpec = Window\
+.partitionBy("CustomerId", "date")\
+.orderBy(desc("Quantity"))\
+.rowsBetween(Window.unboundedPreceding, Window.currentRow)
+
+from pyspark.sql.functions import max, dense_rank, rank
+maxPurchaseQuantity = max(col("Quantity")).over(windowSpec)
+purchaseDenseRank = dense_rank().over(windowSpec)
+purchaseRank = rank().over(windowSpec)
+
+SELECT CustomerId, date, Quantity,
+rank(Quantity) OVER (PARTITION BY CustomerId, date
+ORDER BY Quantity DESC NULLS LAST
+ROWS BETWEEN
+UNBOUNDED PRECEDING AND
+CURRENT ROW) as rank,
+dense_rank(Quantity) OVER (PARTITION BY CustomerId, date
+ORDER BY Quantity DESC NULLS LAST
+ROWS BETWEEN
+UNBOUNDED PRECEDING AND
+CURRENT ROW) as dRank,
+max(Quantity) OVER (PARTITION BY CustomerId, date
+ORDER BY Quantity DESC NULLS LAST
+ROWS BETWEEN
+UNBOUNDED PRECEDING AND
+CURRENT ROW) as maxPurchase
+FROM dfWithDate WHERE CustomerId IS NOT NULL ORDER BY CustomerId
+
+JOINS
+data = [(0, "Bill Chambers", 0, [100]),(1, "Matei Zaharia", 1, [500, 250, 100]),(2, "Michael Armbrust", 1, [250, 100])]
+columns = ["id", "name", "graduate_program", "spark_status"]
+person = spark.createDataFrame(data).toDF(columns)
+
+graduateProgram = spark.createDataFrame([
+(0, "Masters", "School of Information", "UC Berkeley"),
+(2, "Masters", "EECS", "UC Berkeley"),
+(1, "Ph.D.", "EECS", "UC Berkeley")]).toDF("id", "degree", "department", "school")
+
+sparkStatus = spark.createDataFrame([
+(500, "Vice President"),
+(250, "PMC Member"),
+(100, "Contributor")]).toDF("id", "status")
+
+person.createOrReplaceTempView("person")
+graduateProgram.createOrReplaceTempView("graduateProgram")
+sparkStatus.createOrReplaceTempView("sparkStatus")
+
+joinType = "inner"
+person.join(graduateProgram, joinExpression, joinType).show()
+Internal: 
+Shuffle join when big table - big table join --> partitions are shuffled across all nodes across network
+broadcast join big table small table join : small table is copied to all worker nodes
+small table small table: spark can choose 
+
+
+spark.read.format("csv")
+.option("mode", "FAILFAST")
+.option("inferSchema", "true")
+.option("path", "path/to/file(s)")
+.schema(someSchema)
+.load()
+
+Read mode Description
+permissive: Sets all fields to null when it encounters a corrupted record and places all corrupted records
+in a string column called _corrupt_record
+dropMalformed: Drops the row that contains malformed records
+failFast: Fails immediately upon encountering malformed records
+
+DataFrameWriter.format(...).option(...).partitionBy(...).bucketBy(...).sortBy(...).save()
+dataframe.write.format("csv")
+.option("mode", "OVERWRITE")
+.option("dateFormat", "yyyy-MM-dd")
+.option("path", "path/to/file(s)")
+.save()
+
+Save mode Description
+append: Appends the output files to the list of files that already exist at that location
+overwrite: Will completely overwrite any data that already exists there
+errorIfExists: Throws an error and fails the write if data or files already exist at the specified location
+ignore: If data or files exist at the location, do nothing with the current DataFrame
+
+The default is errorIfExists. This means that if Spark finds data at the location to which you’re writing, it will fail the write immediately.
+
+Creating table
+CREATE TABLE partitioned_flights USING parquet PARTITIONED BY (DEST_COUNTRY_NAME)
+AS SELECT DEST_COUNTRY_NAME, ORIGIN_COUNTRY_NAME, count FROM flights LIMIT 5
+
+SPARK SQL
+Catalog: Highest level abstract in spark sql. It contains various functions that help to list tables, database and functions.
+Tables: Managed(created when we use saveAsTable) vs Unmanaged(When we create table from a file)
+Creating table: CREATE TABLE flights_csv (
+DEST_COUNTRY_NAME STRING,
+ORIGIN_COUNTRY_NAME STRING COMMENT "remember, the US will be most prevalent",
+count LONG)
+USING csv OPTIONS (header true, path '/data/flight-data/csv/2015-summary.csv')
+
+#To create Hive specifuc table:
+CREATE TABLE IF NOT EXISTS flights_from_select
+AS SELECT * FROM flights
+
+#Partition Table
+CREATE TABLE partitioned_flights USING parquet PARTITIONED BY (DEST_COUNTRY_NAME)
+AS SELECT DEST_COUNTRY_NAME, ORIGIN_COUNTRY_NAME, count FROM flights LIMIT 5
+
+#Insert Data
+to insert data into a specific partition
+INSERT INTO partitioned_flights
+PARTITION (DEST_COUNTRY_NAME="UNITED STATES")
+SELECT count, ORIGIN_COUNTRY_NAME FROM flights
+WHERE DEST_COUNTRY_NAME='UNITED STATES' LIMIT 12
+
+DESCRIBE TABLE table_name
+SHOW PARTITIONS table_name
+DROP TABLE IF EXISTS table_name (dropping table)
+
+#Views in Spark (view, Temp view, Global view)
+#View is available across all session 
+create view view_name as select * from table_name
+#Temp View is available only during the sessiona dn not in database
+#create temp view as select * from 	table_name
+#Global Temp View are accessible in entire spark application but ends once session ends.
+Create Global temp View as select * from table_name
+# create or replace:
+CREATE OR REPLACE TEMP VIEW just_usa_view_temp AS
+SELECT * FROM flights WHERE dest_country_name = 'United States'
+
+SPARQ SQL Defaults
+spark.sql.broadcastTimeout - 300 - Timeout in seconds for the broadcast waittime in broadcast joins.
+spark.sql.autoBroadcastJoinThreshold - 10485760 (10 MB) -Configures the maximum size in bytes for a table that will be broadcast to 
+all worker nodes when performing a join. You can disable broadcasting by setting this value to-1. Note that currently statistics are 
+supported only for Hive Metastore tables for which the command ANALYZE TABLE COMPUTE STATISTICS noscan has been run.
+spark.sql.shuffle.partitions - 200 - Configures the number of partitions to use when shuffling data for joins or aggregations.
+
+SET spark.sql.shuffle.partitions=20
+
+COALESCE VS REPARTITION
+coalesce is used to reduce number of partitions
+repartition is used to increase number of partitions
+
+we can also use repartition to reduce number of partition then why use coalesce? Because in case say there are 3 partitions and 
+2 are on one data node and 1 is on another and we want to reduce number of partitions to 2, then what coalesce will try 
+is to merge two partitions on same datanode together and in case we use repartition it might not do it that way and will cause 
+a lot of shuffling of rows between data nodes thus is very expensive and in case of coalesce it will try to minimize shuffling 
+by combining partitions on same data node together.
+
+rdd.toDebugString  --> this will print dag for the latest rdd, so every time we do a transformation a new RDD is created and for
+every action a non RDD object is returned. There are multiple stages of execution in a DAG and these depends upon Narrow and Wide
+transformation, all narrow transformations on one stage(one partition) and for wide transformation we create another stage.
+DAG is directed acyclical graph, Nodes are RDD and Edges are transformation.
+
+TASKS = NUMBER OF ACTIONS
+JOBS = NUMBER OF PARTITIONS = NUMBER OF BLOCKS ON HDFS/DISTRIBUTED STORAGE
+STAGES =  NUMBER OF WIDE TRANSFORMATIONS
+
+# Saving data into tables or files: (save saveAsTable insertInto)
+https://towardsdatascience.com/notes-about-saving-data-with-spark-3-0-86ba85ca2b71
+
+( 
+  df.write
+  .mode('overwrite') # or append
+  .partitionBy(col_name) # this is optional
+  .format('parquet') # this is optional, parquet is default
+  .option('path', output_path)
+  .save()
+)
+
+( 
+  df.write
+  .mode('overwrite') # or append
+  .partitionBy(col_name) # this is optional
+  .bucketBy(n, col_name) # n is number of buckets
+  .sortBy(col_name)
+  .format('parquet') # this is optional, parquet is default
+  .option('path', output_path)
+  .saveAsTable(table_name)
+)
+#reading from table
+df = spark.table(table_name)
+
+(
+  df.write
+  .insertInto(table_name)
+)
+# insertInto allows dyna,ic override : spark.conf.set("spark.sql.sources.partitionOverwriteMode", "dynamic") This feature allow us
+to overrite any specific partition in a partitioned tables. savAsTable does NOT provide this feature.
+spark.conf.set("spark.sql.sources.partitionOverwriteMode", "dynamic") -- default is static
+(
+  df # having data only for specific partitions
+  .write
+  .insertInto(table_name, overwrite=True)
+)
+
+SQL
+CREATE TABLE users_bucketed_by_name(
+  name STRING,
+  favorite_color STRING,
+  favorite_numbers array<integer>
+) USING parquet
+CLUSTERED BY(name) INTO 42 BUCKETS;
+
+CREATE TABLE users_by_favorite_color(
+  name STRING,
+  favorite_color STRING,
+  favorite_numbers array<integer>
+) USING csv PARTITIONED BY(favorite_color);
+
+CREATE TABLE users_bucketed_and_partitioned(
+  name STRING,
+  favorite_color STRING,
+  favorite_numbers array<integer>
+) USING parquet
+PARTITIONED BY (favorite_color)
+CLUSTERED BY(name) SORTED BY (favorite_numbers) INTO 42 BUCKETS;
+
+CREATE GLOBAL TEMPORARY VIEW temp_view AS SELECT a + 1, b * 2 FROM tbl
+
+SELECT * FROM global_temp.temp_view
+
+.option("recursiveFileLookup","true") # to load files from nested directory came in spark 3.0 
+in spark 2.0 this was done by uploading files in nested structure manually and then union the two dataframes.
+
+#creating temporary view
+CREATE TEMPORARY VIEW parquetTable
+USING org.apache.spark.sql.parquet
+OPTIONS (
+  path "examples/src/main/resources/people.parquet"
+)
+
+SELECT * FROM parquetTable
+
+spark.catalog.cacheTable("tableName")  # this will store table in columnar format inside memory with high compression
+spark.catalog.uncacheTable("tableName") # use to push table out of cache memory
+
+namely BROADCAST, MERGE, SHUFFLE_HASH and SHUFFLE_REPLICATE_NL, 
+Spark prioritizes the BROADCAST hint over the MERGE hint over the SHUFFLE_HASH hint over the SHUFFLE_REPLICATE_NL hint. 
+
+
+emp = [(1,"Smith",-1,"2018","10","M",3000), \
+    (2,"Rose",1,"2010","20","M",4000), \
+    (3,"Williams",1,"2010","10","M",1000), \
+    (4,"Jones",2,"2005","10","F",2000), \
+    (5,"Brown",2,"2010","40","",-1), \
+      (6,"Brown",2,"2010","50","",-1) \
+  ]
+empColumns = ["emp_id","name","superior_emp_id","year_joined", \
+       "emp_dept_id","gender","salary"]
+	   
+empDF = spark.createDataFrame(data=emp, schema = empColumns)
+empDF.printSchema()
+empDF.show(truncate=False)
+
+
+dept = [("Finance",10), \
+    ("Marketing",20), \
+    ("Sales",30), \
+    ("IT",40) \
+  ]
+deptColumns = ["dept_name","dept_id"]
+deptDF = spark.createDataFrame(data=dept, schema = deptColumns)
+deptDF.printSchema()
+deptDF.show(truncate=False)
